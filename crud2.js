@@ -73,7 +73,7 @@ if(pool){
         }
         conn.query("select * from users");
         conn.on('error',function(err){
-            console.log('데이터베이스 연결 시 에러가 발생했습니다.');
+            console.log('데이터베이스 연결시 에러가 발생했습니다.');
             console.dir(err);
             return;
         });
@@ -112,10 +112,11 @@ router.route('/process/listuser').get(function(req,res){
                 res.write('<table>');
                 res.write('<tr><td>번호</td><td>아이디</td><td>이름</td><td>나이</td></tr>');
                 for(var i=0; i<result.length; i++){
-                    res.write('<tr><td>'+i+'</td><td>'+result[i].id+'</td><td>'+result[i].name+'</td><td>'+result[i].age+'</td></tr>');
+                    res.write('<tr><td>'+i+'</td><td><a href="">'+result[i].id+'</a></td><td>'+result[i].name+'</td><td>'+result[i].age+'</td></tr>');
                 }
                 res.write('</table>');
                 res.write('<a href="/public/adduser2.html">신규등록</a>');
+                res.write('     <a href="/public/login2.html">로그인</a>');
                 res.write('     <a href="/">메인화면</a>');
                 res.end();
             }else{
@@ -134,7 +135,7 @@ router.route('/process/listuser').get(function(req,res){
     }
 });
 //리스트 사용자 DAO처리 함수
-var allUser = function(callback){
+var allUser = function(callback){ //==function(err,result)
     console.log('allUser함수형 변수가 호출됨: ');
     pool.getConnection(function(err, conn){
         if(err){
@@ -148,7 +149,7 @@ var allUser = function(callback){
         var columns = ['id','name','age'];
         var tablename = 'users';
         //SQL문을 실행 preparedStatement 미리 정의된 SQL문
-        var exec = conn.query("select ?? from ??", [columns, tablename], function(err,rows){
+        var exec = conn.query("select ?? from ?? ", [columns, tablename], function(err,rows){
             conn.release();//연결해제
             console.log('실행 대상 SQL : '+exec.sql)
             if(rows.length > 0){
@@ -176,10 +177,124 @@ router.route('/process/adduser').post(function(req,res){
     var paramName = req.body.name || req.query.name;
     var paramAge = req.body.age || req.query.age;
     console.log('요청 파라미터 : '+ paramId+','+paramPassword+','+paramName+','+paramAge);
+    if(pool){
+        addUser(paramId, paramName, paramAge,paramPassword, function(err, result){
+            if(err){
+                console.error('사용자 추가중 에러 발생: '+ err.stack);
+                res.writeHead('200',{'Content-Type':"text/html;charset=utf8"});
+                res.write('<h2>사용자 추가 중 에러가 발생했습니다. </h2>');
+               
+                res.write('<a href="/public/adduser2.html">이전화면으로 이동</a>');
+                res.end();
+            }
+            if(result){
+                console.dir(result);
+                res.writeHead('200',{'Content-Type':"text/html;charset=utf8"});
+                res.write('<h2>사용자 추가 성공</h2>');
+                res.write('<br><a href="/public/listuser2.html">사용자 리스트</a>');
+                res.write('<br><a href="/public/login2.html">로그인</a>');
+                res.end();
+            }else{
+                res.writeHead('200',{'Content-Type':"text/html;charset=utf8"});
+                res.write('<h2>사용자 추가 실패</h2>');
+                res.write('<br><a href="/public/listuser2.html">사용자 리스트</a>');
+                res.write('<br><a href="/public/adduser2.html">사용자 등록</a>');
+                res.end();
+            }
+        });
+    }
     return;
 });
 
-// 라우터 객체 등록
+// 사용자 추가 쿼리실행-함수형 변수
+var addUser = function(id, name, age, password, callback){
+    console.log('addUser함수형 변수가 호출됨 : ');
+    pool.getConnection(function(err, conn){
+        if(err){
+            if(conn){
+                conn.release();//에러시 DB커넥션 해제   
+            }
+            callback(err, null);
+            return;
+        }
+        // html파라미터 데이터를 insert쿼리에 사용하기 위해서 객체로 만듦
+        var data = {id:id, name:name, age:age,password:password};//json데이터타입의 객체(배열, 키:밸류)
+        // SQL문 실행
+        var exec = conn.query('insert into users set ?', data, function(err,result){
+            conn.release();
+            console.log('SQL구문 확인 : '+exec.sql);
+            if(err){
+                console.log('쿼리 에러 발생');
+                console.dir(err);
+                callback(err,null);
+                return;
+            }
+            callback(null, result);
+        });
+    });
+}
+// 로그인 process라우터 설정
+router.route('process/login').post(function(req,res){
+    console.log('/process/login 호출됨: ');
+    var paramId = req.body.id;
+    var paramPassword = req.body.password;
+    if(pool){
+        authUser(paramId, paramPassword, function(err, result){
+            if(err){
+                console.log('사용자 로그인 중 에러가 발생되었습니다.');
+                res.writeHead('200',{'Content-Type':"text/html;charset=utf8"});
+                res.write('<h2> 사용자 로그인 중 에러 발생</h2>');
+                res.write('<a href="/public/login2.html">이전화면</a>');
+                res.write('<p>'+err.stack+'</p>');        
+                res.end();
+            }
+            if(result){
+                console.dir(result);
+                res.writeHead('200',{'Content-Type':"text/html;charset=utf8"});
+                res.write('<h1>로그인 성공</h1>');
+                res.write('<div><p>사용자 아이디: '+ result[0].id+'</p></div>');
+                res.write('<div><p>사용자 이름: '+ result[0].name+'</p></div>');
+                res.write('<a href="/">로그아웃</a>');
+                res.end();
+            }else{
+                res.writeHead('200',{'Content-Type':"text/html;charset=utf8"});
+                res.write('<h1>로그인 실패</h1>');
+                res.write('<div><p>아이디와 패스워드를 다시 확인하세요!</p></div>');
+                res.write('<a href="/public/login2.html">다시 로그인</a>');
+                res.end();
+            }
+        });
+    }
+});
+// 로그인 DAO처리(아래)
+var authUser = function(id, password, callback){
+    console.log('authUser 함수형변수 호출: ');
+    pool.getConnection(function(err, conn){
+        if(err){
+            if(conn){
+                conn.release();//에러발생시 기존 커넥션 해제
+            }
+            callback(err,null);
+            return;
+        }
+        var columns = ['id', 'name', 'age'];
+        var tablename = 'users';
+        //SQL 조회쿼리 실행
+        var exec = conn.query("select ?? from ?? where id = ? and password = ?",[columns, tablename, id, password], function(err,rows){
+            conn.release();//쿼리실행 후 커넥션 해제
+            console.log('쿼리 명령어 : '+ exec.sql);
+            if(rows.length>0){
+                console.log('아이디'+id+', 패스워드 [%s]가 일치하는 사용자 찾음', password);
+                callback(null, rows);
+            }else{
+                console.log('일치하는 사용자를 찾지 못했습니다.');
+                callback(null, null);
+            }
+        });
+    });
+}
+
+// 라우터 객체 등록('/'를 기본설정)
 app.use('/',router);
 
 // 에러 페이지 처리
