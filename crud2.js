@@ -6,15 +6,14 @@
  */
 
 // Express 프레임워크 기본 모듈들 불러오기
-var express = require('express')
-, http = require('http')
-, path = require('path');
+var express = require('express');
+var http = require('http');
+var path = require('path');
 
 // Express용 미들웨어 모듈 불러오기
-var bodyParser = require('body-parser')
-, cookieParser = require('cookie-parser')
-, static = require('serve-static')
-, errorHandler = require('errorhandler');
+var bodyParser = require('body-parser');
+var static = require('serve-static');
+var errorHandler = require('errorhandler');
 
 //에러 핸들러 모듈 사용
 var expressErrorHandler = require('express-error-handler');
@@ -24,7 +23,7 @@ var expressSession = require('express-session');
 
 // Mysql 데이터베이스를 사용할 수 있도록 하는 모듈 불러오기
 var mysql = require('mysql');
-const { callbackify } = require('util');
+const { json } = require('body-parser');
 
 // Mysql 데이터베이스 연결 설정
 var pool = mysql.createPool({
@@ -42,6 +41,10 @@ var app = express();
 // 기본환경설정파일 env에 들어있는 port정보 또는 지정한 3000 웹서버 포트 생성
 app.set('port', process.env.PORT || 3000);
 
+// view engine setup
+app.set('views', path.join(__dirname, 'views'));
+app.set('view engine', 'ejs');
+
 //body-parser form-urlencoding설정
 app.use(bodyParser.urlencoded({extended:false}));
 //body-parser json파싱설정
@@ -50,15 +53,6 @@ app.use(bodyParser.json());
 // public 폴더를 static 콘텐츠 공간으로 설정
 app.use('/public', static(path.join(__dirname,'public')));
 
-//쿠키 파서 설정
-app.use(cookieParser());
-
-//세션 설정
-app.use(expressSession({
-    secret:'my key',
-    resave:true,
-    saveUninitialized:true
-}));
 
 // 데이터베이스 커넥션 확인
 if(pool){
@@ -89,6 +83,98 @@ router.route('/').get(function(req,res){
     res.status(200);
     res.sendFile(path.join(__dirname,'public','listuser2.html'));
 });
+// 업데이트 DAO 처리
+router.route('/process/updateuser').post(function(req,res) {
+    if(pool) {
+        pool.getConnection(function(err, conn) {
+            if(err) {
+                conn.release();
+                res.writeHead('200',{'Content-Type':'text/html;charset=utf8'});
+                res.write(err.stack);
+                res.end();
+                return;
+            }
+            if(conn) {
+                var paramId = req.body.id;
+                var paramName = req.body.name;
+                var paramAge = req.body.age;
+                var paramPassword = req.body.password;
+                var updateSet = {name:paramName,age:paramAge,password:paramPassword};
+                var exec = conn.query("update users set ? where id = ?",[updateSet, paramId],function(err, result) {
+                    if(err) {
+                        if(conn) { conn.release(); }
+                        res.writeHead('200',{'Content-Type':'text/html;charset=utf8'});
+                        res.write(err.stack);
+                        res.end();
+                        return;
+                    }
+                    console.log("디버그 update결과 : " + result.changedRows);//데이터가 실제로 변경된 행의 수
+                    console.log("디버그 update쿼리 : " + exec.sql);
+                    if(result.changedRows >0){
+                        res.writeHead('200',{'Content-Type':'text/html;charset=utf8'});
+                        res.write('<script>alert("수정되었습니다.");location.replace("/process_form/updateusers?id='+paramId+'");</script>');
+                        res.end();
+                    }else{
+                        res.writeHead('200',{'Content-Type':'text/html;charset=utf8'});
+                        res.write('<script>alert("수정된 값이 없습니다.");location.replace("/process_form/updateusers?id='+paramId+'");</script>');
+                        //res.redirect('/process_form/updateusers?id='+paramId);
+                        //res.end();
+                    }
+                });
+            }
+        });
+    }
+});
+// 뷰페이지 연결(업데이트페이지와 같음)
+router.route('/process_form/updateusers').get(function(req,res){
+    var jsonData;//html로 보낼 객체 생성
+    if(pool){
+        viewUser(req.query.id, function(err, result){
+            if(err){
+                console.error('사용자 뷰 조회 중 에러 발생: '+ err.stack);
+                //에러 상황을 브라우저에 출력함
+                res.writeHead('200', {'Content-type':'text/html;charset=utf8'});
+                res.write(err.stack);
+                res.end();
+            }
+            if(result[0]){
+                console.log(result[0]);
+                //jsonData = JSON.stringify(result[0]);//제이슨데이터를 스트링으로 변환-> 필요X
+                //console.log("디버그 jsonData : "+ jsonData);
+                res.render(__dirname+'/views/updateuser2', result[0] );
+            }else{
+                res.writeHead('200', {'Content-type':'text/html;charset=utf8'});
+                res.write('<script>alert("조회된 값이 없습니다.");history.back();</script>');
+                res.end();
+            }
+        });
+    }
+});
+//뷰 페이지 DAO 처리
+var viewUser = function(id, callback) {
+    pool.getConnection(function(err, conn){
+        if(err){
+            if(conn){ conn.release();}
+            callback(err, null);
+            return;
+        }
+        var exec = conn.query("select * from users where id = ?", id, function(err, rows){
+            if(err){
+                console.error('사용자 뷰 조회 중 에러 발생: '+ err.stack);
+                res.writeHead('200', {'Content-type':'text/html;charset=utf8'});
+                res.write(err.stack);
+                res.end();
+            }
+            if(rows){
+                console.log(rows);
+                callback(null,rows);
+            }else{
+                callback(null,null)
+            }
+        });
+    });
+}
+
 //리스트 사용자페이지 연결
 router.route('/process/listuser').get(function(req,res){
     console.log('/process/listuser 호출됨');
@@ -112,7 +198,7 @@ router.route('/process/listuser').get(function(req,res){
                 res.write('<table>');
                 res.write('<tr><td>번호</td><td>아이디</td><td>이름</td><td>나이</td></tr>');
                 for(var i=0; i<result.length; i++){
-                    res.write('<tr><td>'+i+'</td><td><a href="">'+result[i].id+'</a></td><td>'+result[i].name+'</td><td>'+result[i].age+'</td></tr>');
+                    res.write('<tr><td>'+i+'</td><td><a href="/process_form/updateusers?id='+result[i].id+'">'+result[i].id+'</a></td><td>'+result[i].name+'</td><td>'+result[i].age+'</td></tr>');
                 }
                 res.write('</table>');
                 res.write('<a href="/public/adduser2.html">신규등록</a>');
@@ -234,7 +320,7 @@ var addUser = function(id, name, age, password, callback){
     });
 }
 // 로그인 process라우터 설정
-router.route('process/login').post(function(req,res){
+router.route('/process/login').post(function(req,res){
     console.log('/process/login 호출됨: ');
     var paramId = req.body.id;
     var paramPassword = req.body.password;
@@ -277,14 +363,14 @@ var authUser = function(id, password, callback){
             callback(err,null);
             return;
         }
-        var columns = ['id', 'name', 'age'];
+        var columns = ['id','name','age'];
         var tablename = 'users';
-        //SQL 조회쿼리 실행
-        var exec = conn.query("select ?? from ?? where id = ? and password = ?",[columns, tablename, id, password], function(err,rows){
+        //SQL 조회쿼리실행
+        var exec = conn.query("select ?? from ?? where id = ? and password = ?",[columns,tablename,id,password], function(err, rows) {
             conn.release();//쿼리실행 후 커넥션 해제
             console.log('쿼리 명령어 : '+ exec.sql);
-            if(rows.length>0){
-                console.log('아이디'+id+', 패스워드 [%s]가 일치하는 사용자 찾음', password);
+            if(rows.length>0) {
+                console.log('아이디' + id +', 패스워드 [%s]가 일치하는 사용자 찾음', password);
                 callback(null, rows);
             }else{
                 console.log('일치하는 사용자를 찾지 못했습니다.');
